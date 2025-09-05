@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Worksheet JSON Viewer (Frontend Upload)</title>
+  <link href="https://cdn.jsdelivr.net/npm/jsoneditor@9.10.0/dist/jsoneditor.min.css" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #f7f7fb;
+      --card: #ffffff;
+      --border: #e5e7eb;
+      --text: #111827;
+      --muted: #6b7280;
+      --accent: #2563eb;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji';
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+    header {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+      background: var(--card);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 20px 16px 40px;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+    @media (min-width: 900px) {
+      .row { grid-template-columns: 320px 1fr; }
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    h1 { font-size: 20px; margin: 0; }
+    p { margin: 8px 0 0; color: var(--muted); }
+    .controls label { font-weight: 600; font-size: 14px; }
+    .controls .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+    .dropzone {
+      margin-top: 12px;
+      border: 2px dashed var(--border);
+      border-radius: 12px;
+      padding: 18px;
+      text-align: center;
+      background: #fafafa;
+      transition: border-color .2s, background .2s;
+      cursor: pointer;
+    }
+    .dropzone.dragover {
+      border-color: var(--accent);
+      background: #eef2ff;
+    }
+    .file-list {
+      margin-top: 12px;
+      padding: 0;
+      list-style: none;
+      max-height: 180px;
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .file-list li {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 14px;
+    }
+    .file-list li:last-child { border-bottom: none; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: #1f2937;
+      border: 1px solid var(--border);
+      font-size: 12px;
+      margin-left: 8px;
+    }
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-top: 10px;
+      flex-wrap: wrap;
+    }
+    select, button {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: var(--card);
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    button.primary {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    #editor {
+      width: 100%;
+      height: 70vh;
+      /* 初始完全空白，因此不顯示任何預設文字 */
+    }
+    footer {
+      text-align: center;
+      padding: 20px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Worksheet JSON Viewer（前台上傳版）</h1>
+    <!-- 念茲在茲：依你的需求，這裡不再出現任何關於右側視圖的提示敘述 -->
+  </header>
+
+  <div class="container">
+    <div class="row">
+      <aside class="card controls">
+        <label>上傳 JSON（可一次多檔）：</label>
+        <input id="fileInput" type="file" accept=".json,application/json" multiple style="margin-top:8px"/>
+        <div id="dropzone" class="dropzone">拖放 JSON 到這裡，或點擊上方選擇檔案</div>
+        <div class="hint">建議以英文小寫與無空格命名，如：<code>b1.json</code>、<code>b2.json</code>、<code>c1.json</code>。</div>
+
+        <ul id="fileList" class="file-list" aria-live="polite"></ul>
+
+        <div class="toolbar">
+          <label for="viewerSelect">檢視檔案：</label>
+          <select id="viewerSelect"></select>
+
+          <label for="modeSelect">模式：</label>
+          <select id="modeSelect">
+            <option value="view" selected>View（只讀樹狀）</option>
+            <option value="tree">Tree（可展開/編輯）</option>
+            <option value="code">Code（原始碼）</option>
+          </select>
+
+          <button id="clearBtn">清除全部</button>
+        </div>
+      </aside>
+
+      <section class="card">
+        <div id="editor"></div>
+      </section>
+    </div>
+  </div>
+
+  <footer>前台上傳即用｜無後端｜適合 GitHub Pages / Netlify / Vercel 發佈</footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/jsoneditor@9.10.0/dist/jsoneditor.min.js"></script>
+  <script>
+    // 狀態
+    const store = new Map(); // filename -> { json }
+    let editor = null;
+
+    const el = {
+      fileInput: document.getElementById('fileInput'),
+      dropzone: document.getElementById('dropzone'),
+      fileList: document.getElementById('fileList'),
+      viewerSelect: document.getElementById('viewerSelect'),
+      modeSelect: document.getElementById('modeSelect')
+    };
+
+    // 建立 JSONEditor（初始為空）
+    function createEditor(mode='view', data=null) {
+      const container = document.getElementById('editor');
+      if (editor) { editor.destroy(); }
+      editor = new JSONEditor(container, {
+        mode,
+        mainMenuBar: false,
+        navigationBar: true
+      }, data || {});
+    }
+    // ✅ 初始化為空白（沒有任何預設內容或提示）
+    createEditor('view', {});
+
+    // 檔名 → 預估級別 badge
+    function detectLevelBadge(name) {
+      if (/c1/i.test(name)) return '<span class="badge">C1</span>';
+      if (/b2/i.test(name)) return '<span class="badge">B2</span>';
+      if (/b1/i.test(name)) return '<span class="badge">B1</span>';
+      return '';
+    }
+
+    // 渲染檔案列表與下拉
+    function renderLists() {
+      // 檔案清單
+      el.fileList.innerHTML = '';
+      for (const [filename] of store.entries()) {
+        const li = document.createElement('li');
+        li.innerHTML = `${filename} ${detectLevelBadge(filename)}`;
+        const removeBtn = document.createElement('button');
+        removeBtn.textContent = '移除';
+        removeBtn.addEventListener('click', () => {
+          const current = el.viewerSelect.value;
+          store.delete(filename);
+          if (current === filename) {
+            const first = store.keys().next().value;
+            if (first) {
+              el.viewerSelect.value = first;
+              onSelectChange();
+            } else {
+              el.viewerSelect.innerHTML = '';
+              // 保持右側空白
+              createEditor(el.modeSelect.value, {});
+            }
+          }
+          renderLists();
+        });
+        li.appendChild(removeBtn);
+        el.fileList.appendChild(li);
+      }
+
+      // 下拉
+      const current = el.viewerSelect.value;
+      el.viewerSelect.innerHTML = '';
+      for (const filename of store.keys()) {
+        const opt = document.createElement('option');
+        opt.value = filename;
+        opt.textContent = filename;
+        el.viewerSelect.appendChild(opt);
+      }
+      if (store.size > 0) {
+        el.viewerSelect.value = store.has(current) ? current : store.keys().next().value;
+      }
+    }
+
+    // 讀檔
+    function handleFiles(files) {
+      [...files].forEach(file => {
+        const reader = new FileReader();
+        reader.onload = e => {
+          try {
+            const json = JSON.parse(e.target.result);
+            store.set(file.name, { json });
+            renderLists();
+            // 若是首次加入，立即顯示
+            if (store.size === 1) {
+              el.viewerSelect.value = file.name;
+              onSelectChange();
+            }
+          } catch (err) {
+            alert('解析失敗：' + file.name + '\\n' + err.message);
+          }
+        };
+        reader.readAsText(file, 'utf-8');
+      });
+    }
+
+    // 事件：input
+    el.fileInput.addEventListener('change', (e) => {
+      handleFiles(e.target.files);
+      e.target.value = '';
+    });
+
+    // 事件：拖放
+    ;['dragenter', 'dragover'].forEach(evt => {
+      el.dropzone.addEventListener(evt, e => {
+        e.preventDefault();
+        e.stopPropagation();
+        el.dropzone.classList.add('dragover');
+      });
+    });
+    ;['dragleave', 'drop'].forEach(evt => {
+      el.dropzone.addEventListener(evt, e => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (evt === 'drop') {
+          const files = e.dataTransfer.files;
+          handleFiles(files);
+        }
+        el.dropzone.classList.remove('dragover');
+      });
+    });
+
+    // 切換觀看檔案
+    function onSelectChange() {
+      const key = el.viewerSelect.value;
+      const data = store.get(key)?.json || {};
+      createEditor(el.modeSelect.value, data);
+    }
+    el.viewerSelect.addEventListener('change', onSelectChange);
+
+    // 切換模式
+    el.modeSelect.addEventListener('change', () => {
+      const key = el.viewerSelect.value;
+      const data = store.get(key)?.json || {};
+      createEditor(el.modeSelect.value, data);
+    });
+
+    // 清除
+    document.getElementById('clearBtn').addEventListener('click', () => {
+      store.clear();
+      renderLists();
+      el.viewerSelect.innerHTML = '';
+      // 清空右側，保持空白
+      createEditor(el.modeSelect.value, {});
+    });
+  </script>
+</body>
+</html>
